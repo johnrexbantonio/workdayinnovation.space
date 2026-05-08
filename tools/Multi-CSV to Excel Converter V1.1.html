@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-CSV to Excel Converter V1.1</title>
+    <!-- SheetJS for Excel generation -->
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .drop-zone--over {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex flex-col items-center pt-12">
+
+    <div class="max-w-2xl w-full bg-white rounded-xl shadow-lg p-8 mx-4">
+        <header class="mb-8 text-center">
+            <div class="inline-block px-3 py-1 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-full mb-4 tracking-widest uppercase">Version 1.1</div>
+            <h1 class="text-3xl font-bold text-slate-800">CSV to Multi-Sheet Excel</h1>
+            <p class="text-slate-500 mt-2">Combine multiple CSVs into one .xlsx file. Each file becomes a sheet.</p>
+            
+            <div class="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-lg text-left">
+                <p class="text-xs text-amber-800 font-bold uppercase mb-1 flex items-center gap-1">
+                    <i data-lucide="shield-check" class="w-3 h-3"></i> Formatting Protection Active
+                </p>
+                <p class="text-xs text-amber-700 leading-relaxed">
+                    This tool imports all data as <strong>Raw Text</strong>. Excel's automatic formatting is disabled to prevent data corruption (e.g., leading zeros in IDs are preserved, and text-based dates are not converted to serial numbers).
+                </p>
+            </div>
+        </header>
+
+        <!-- Drop Zone -->
+        <div 
+            id="dropZone"
+            class="border-2 border-dashed border-slate-300 rounded-lg p-10 flex flex-col items-center justify-center cursor-pointer transition-all hover:border-blue-400 hover:bg-blue-50"
+        >
+            <i data-lucide="file-up" class="w-12 h-12 text-slate-400 mb-4"></i>
+            <p class="text-slate-600 font-medium">Click to select or drag & drop CSV files</p>
+            <p class="text-slate-400 text-sm mt-1">Comma-delimited files only</p>
+            <input type="file" id="fileInput" multiple accept=".csv" class="hidden">
+        </div>
+
+        <!-- File List -->
+        <div id="fileListContainer" class="mt-8 hidden">
+            <h3 class="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">Selected Files</h3>
+            <ul id="fileList" class="divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+                <!-- JS populated -->
+            </ul>
+
+            <div class="mt-8 flex gap-4">
+                <button 
+                    id="convertBtn"
+                    class="flex-1 bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 active:transform active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                    <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
+                    Generate Excel File
+                </button>
+                <button 
+                    id="clearBtn"
+                    class="bg-slate-100 text-slate-600 font-semibold py-3 px-6 rounded-lg hover:bg-slate-200 transition-all"
+                >
+                    Clear
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Message -->
+        <div id="status" class="mt-6 hidden p-4 rounded-lg text-sm text-center font-medium"></div>
+    </div>
+
+    <!-- Professional Footer -->
+    <footer class="w-full bg-white border-t p-10 mt-16 text-center flex flex-col items-center shadow-inner">
+      <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Core Systems Integration Tools</p>
+      <p class="text-sm font-medium text-slate-600">Developed by <span class="text-slate-900 font-black">John Rex Antonio</span></p>
+      <div class="mt-6 flex flex-wrap justify-center gap-8">
+          <a href="mailto:john.rex.antonio@ibm.com" class="flex items-center gap-2 text-xs text-blue-600 hover:text-blue-800 font-black tracking-tight transition-all">
+            <i data-lucide="mail" class="w-4 h-4"></i> john.rex.antonio@ibm.com
+          </a>
+          <div class="flex items-center gap-2 text-xs text-slate-500 font-black border-l pl-8 tracking-tight">
+            <i data-lucide="slack" class="w-4 h-4 text-purple-600"></i> Available via internal IBM Slack for Support
+          </div>
+      </div>
+      <p class="mt-8 text-slate-300 text-[10px] uppercase tracking-tighter italic">Data processed locally • No server upload</p>
+    </footer>
+
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const fileListContainer = document.getElementById('fileListContainer');
+        const convertBtn = document.getElementById('convertBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const status = document.getElementById('status');
+
+        let selectedFiles = [];
+
+        // UI Event Listeners
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drop-zone--over');
+        });
+
+        ['dragleave', 'dragend'].forEach(type => {
+            dropZone.addEventListener(type, () => {
+                dropZone.classList.remove('drop-zone--over');
+            });
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drop-zone--over');
+            if (e.dataTransfer.files.length) {
+                handleFiles(e.dataTransfer.files);
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            selectedFiles = [];
+            updateUI();
+            status.classList.add('hidden');
+        });
+
+        convertBtn.addEventListener('click', async () => {
+            if (selectedFiles.length === 0) return;
+            
+            showStatus('Processing files strictly as text...', 'bg-blue-50 text-blue-700');
+            
+            try {
+                await generateExcel();
+                showStatus('Success! Excel file downloaded.', 'bg-green-50 text-green-700');
+            } catch (err) {
+                console.error(err);
+                showStatus('Error processing files: ' + err.message, 'bg-red-50 text-red-700');
+            }
+        });
+
+        function handleFiles(files) {
+            const csvFiles = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.csv'));
+            
+            if (csvFiles.length === 0 && files.length > 0) {
+                showStatus('Please select only .csv files.', 'bg-amber-50 text-amber-700');
+                return;
+            }
+
+            csvFiles.forEach(file => {
+                if (!selectedFiles.find(f => f.name === file.name)) {
+                    selectedFiles.push(file);
+                }
+            });
+
+            updateUI();
+        }
+
+        function updateUI() {
+            fileList.innerHTML = '';
+            if (selectedFiles.length > 0) {
+                fileListContainer.classList.remove('hidden');
+                selectedFiles.forEach((file, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center justify-between p-3 bg-white hover:bg-slate-50';
+                    li.innerHTML = `
+                        <div class="flex items-center space-x-3">
+                            <span class="text-[10px] font-black text-blue-500 bg-blue-50 px-2 py-1 rounded uppercase">CSV</span>
+                            <span class="text-sm text-slate-700 truncate max-w-xs font-medium">${file.name}</span>
+                        </div>
+                        <button onclick="removeFile(${index})" class="text-slate-300 hover:text-red-500 transition-colors">
+                            <i data-lucide="x-circle" class="w-5 h-5"></i>
+                        </button>
+                    `;
+                    fileList.appendChild(li);
+                });
+                lucide.createIcons();
+            } else {
+                fileListContainer.classList.add('hidden');
+            }
+        }
+
+        window.removeFile = (index) => {
+            selectedFiles.splice(index, 1);
+            updateUI();
+        };
+
+        function showStatus(msg, classes) {
+            status.textContent = msg;
+            status.className = `mt-6 p-4 rounded-lg text-sm text-center font-bold ${classes}`;
+            status.classList.remove('hidden');
+        }
+
+        async function generateExcel() {
+            const wb = XLSX.utils.book_new();
+
+            for (const file of selectedFiles) {
+                const text = await file.text();
+                
+                // Parse CSV into an AOE (Array of Objects) or AOA (Array of Arrays)
+                const data = parseCSVToAOA(text);
+                
+                // Convert to worksheet
+                const ws = XLSX.utils.aoa_to_sheet(data);
+
+                // Sanitizing sheet name
+                let sheetName = file.name.replace(/\.[^/.]+$/, "") 
+                                         .replace(/[\\/*?:\[\]]/g, "_")
+                                         .substring(0, 31);
+
+                if (wb.SheetNames.includes(sheetName)) {
+                    sheetName = sheetName.substring(0, 28) + "_" + Math.floor(Math.random() * 100);
+                }
+
+                XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            }
+
+            XLSX.writeFile(wb, "Consolidated_Report.xlsx");
+        }
+
+        /**
+         * Parses CSV and ensures every cell is typed as 's' (String)
+         * to prevent Excel from auto-formatting numeric strings or dates.
+         */
+        function parseCSVToAOA(str) {
+            const arr = [];
+            let quote = false;
+            let row = [""], col = 0;
+
+            for (let i = 0; i < str.length; i++) {
+                let char = str[i], next = str[i+1];
+                
+                if (char === '"' && quote && next === '"') { 
+                    row[col] += char; i++; 
+                } else if (char === '"') { 
+                    quote = !quote; 
+                } else if (char === ',' && !quote) { 
+                    row[++col] = ""; 
+                } else if (char === '\n' && !quote) { 
+                    if (str[i-1] === '\r') row[col] = row[col].slice(0, -1);
+                    arr.push(row); row = [""]; col = 0; 
+                } else { 
+                    row[col] += char; 
+                }
+            }
+            if (row.length > 1 || row[0] !== "") arr.push(row);
+            
+            // Map to SheetJS cell objects with explicit 's' type
+            return arr.map(row => row.map(cellText => {
+                return { v: cellText.trim(), t: 's' };
+            }));
+        }
+    </script>
+</body>
+</html>

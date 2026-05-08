@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADP Field Validator 2.1</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .sticky-header { position: sticky; top: 0; background: white; z-index: 10; }
+        .record-card:hover { border-color: #3b82f6; }
+        .empty-value { color: #9ca3af; font-style: italic; }
+        details summary::-webkit-details-marker { display:none; }
+        
+        /* Global Tooltip Styling */
+        #global-tooltip {
+            position: fixed;
+            z-index: 9999;
+            width: 280px;
+            background-color: #1e293b;
+            color: #fff;
+            text-align: left;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            line-height: 1.5;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            pointer-events: none;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.15s ease-in-out;
+        }
+        .header-cell-inner { cursor: help; }
+
+        /* Sticky Column logic for Validation Table */
+        .sticky-col-1 { position: sticky; left: 0; z-index: 20; width: 130px; min-width: 130px; max-width: 130px; }
+        .sticky-col-2 { position: sticky; left: 130px; z-index: 20; width: 130px; min-width: 130px; max-width: 130px; border-right: 2px solid #e2e8f0 !important; }
+        thead .sticky-col-1, thead .sticky-col-2 { z-index: 30; }
+
+        .tab-active { border-bottom: 3px solid #2563eb; color: #2563eb; font-weight: bold; }
+        
+        /* Reference Table Styling */
+        .ref-table-container {
+            max-height: 450px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+        }
+
+        /* Custom Modal Styling */
+        #modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-900 flex flex-col">
+
+    <div id="global-tooltip"></div>
+
+    <!-- Custom Modal UI -->
+    <div id="modal-overlay">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md">
+            <h3 id="modal-title" class="text-lg font-bold mb-4 text-slate-800">Modal Title</h3>
+            <div id="modal-content" class="space-y-4"></div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button id="modal-cancel" class="px-4 py-2 text-slate-500 hover:text-slate-700 font-bold transition-colors">Cancel</button>
+                <button id="modal-confirm" class="px-6 py-2 bg-blue-600 text-white rounded-md font-bold shadow-md hover:bg-blue-700 transition-all">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex-grow max-w-7xl mx-auto p-4 md:p-8 w-full">
+        <header class="mb-6 flex justify-between items-start">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800 tracking-tight">ADP Field Validator 2.1</h1>
+                <p class="text-blue-600 font-bold">Configurable Team Edition</p>
+                <p class="text-slate-500 text-sm mt-1 max-w-2xl italic text-xs">A robust tool for developers and testers to validate ADP HR interface files. Accelerate debugging with real-time mapping to business logic and Workday source fields.</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="exportConfig()" class="px-3 py-1.5 bg-white border border-slate-300 rounded text-xs font-bold hover:bg-slate-50 transition-all flex items-center gap-1 shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Export Setup
+                </button>
+                <button onclick="document.getElementById('importInput').click()" class="px-3 py-1.5 bg-white border border-slate-300 rounded text-xs font-bold hover:bg-slate-50 transition-all flex items-center gap-1 shadow-sm">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Import Setup
+                </button>
+                <input type="file" id="importInput" class="hidden" accept=".json" onchange="importConfig(event)">
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="flex border-b border-slate-200 mb-8 bg-white px-4 rounded-t-lg shadow-sm">
+            <button id="tabValidator" onclick="switchMainTab('validator')" class="px-6 py-4 text-sm tab-active transition-all">Validator</button>
+            <button id="tabConfig" onclick="switchMainTab('config')" class="px-6 py-4 text-sm text-slate-500 hover:text-blue-600 transition-all">Configuration Editor</button>
+            <button id="tabGuide" onclick="switchMainTab('guide')" class="px-6 py-4 text-sm text-slate-500 hover:text-blue-600 transition-all">User Guide</button>
+        </nav>
+
+        <!-- Validator Section -->
+        <div id="sectionValidator" class="space-y-6">
+            <div class="flex flex-col gap-6">
+                <!-- Widened Logic Table -->
+                <section class="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+                        <h3 class="font-bold text-blue-900 text-sm flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>
+                            Validated Against BRD Logic and Workday Source
+                        </h3>
+                        <div class="flex gap-2 w-full md:w-auto">
+                            <select id="refTypeFilter" onchange="filterRefTable()" class="text-xs border border-blue-200 rounded px-2 py-1 bg-white shadow-sm flex-grow md:min-w-[150px]"></select>
+                            <input type="text" id="refSearch" onkeyup="filterRefTable()" placeholder="Search labels or logic..." class="text-xs border border-blue-200 rounded px-3 py-1 bg-white shadow-sm flex-grow md:w-64">
+                        </div>
+                    </div>
+                    <div class="ref-table-container bg-white shadow-inner border border-slate-200">
+                        <table class="w-full text-left text-[11px] border-collapse">
+                            <thead class="sticky top-0 bg-slate-100 shadow-sm z-10 text-slate-600 font-bold uppercase">
+                                <tr>
+                                    <th class="p-2 border-b border-r w-12 text-center">Type</th>
+                                    <th class="p-2 border-b border-r w-10 text-center">#</th>
+                                    <th class="p-2 border-b border-r w-48">Field Label</th>
+                                    <th class="p-2 border-b border-r text-center">Logic / Format</th>
+                                    <th class="p-2 border-b text-center">Workday Source</th>
+                                    <th class="p-2 border-b border-l w-10 text-center">Req</th>
+                                    <th class="p-2 border-b border-l w-10 text-center">Opt</th>
+                                </tr>
+                            </thead>
+                            <tbody id="referenceTableBody" class="text-slate-700"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Parser Settings Block Below -->
+                <div class="grid md:grid-cols-2 gap-6 bg-blue-50 border border-blue-100 rounded-xl p-6 text-sm">
+                    <div>
+                        <h3 class="font-bold text-blue-900 mb-2 uppercase tracking-wider text-[10px]">Parser Settings</h3>
+                        <div class="flex items-center gap-6 bg-white p-3 rounded-lg border border-blue-100 shadow-sm">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Delimiter</label>
+                                <select id="delimiterSelector" class="text-sm font-bold border-0 bg-transparent focus:ring-0 cursor-pointer">
+                                    <option value="|">Pipe ( | )</option>
+                                    <option value=",">Comma ( , )</option>
+                                    <option value="\t">Tab ( \t )</option>
+                                    <option value="#">Hash ( # )</option>
+                                </select>
+                            </div>
+                            <div class="h-8 w-px bg-slate-200"></div>
+                            <button onclick="document.getElementById('dataFileInput').click()" class="flex flex-col items-start hover:text-blue-600 transition-all">
+                                <span class="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Input Source</span>
+                                <span class="text-sm font-bold flex items-center gap-1 text-slate-700">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    Upload Data File
+                                </span>
+                            </button>
+                            <input type="file" id="dataFileInput" class="hidden" onchange="loadDataFromFile(event)">
+                        </div>
+                    </div>
+                    <div class="flex flex-col justify-end">
+                        <div class="flex gap-2">
+                            <button onclick="loadSampleData()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-bold shadow-sm transition-all flex-grow">Load Default Sample</button>
+                            <button onclick="processData()" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-md text-xs font-bold shadow-sm transition-all flex-grow">Run Validation</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <textarea id="rawInput" class="w-full h-40 p-3 text-sm font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Paste data rows here..."></textarea>
+            </div>
+
+            <div id="resultsHeader" class="hidden flex flex-wrap gap-4 items-center justify-between bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
+                <div class="flex gap-2">
+                    <span id="statTotal" class="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full border border-blue-200"></span>
+                    <span id="statErrors" class="bg-red-100 text-red-800 text-xs font-bold px-3 py-1 rounded-full border border-red-200"></span>
+                </div>
+                <div class="flex flex-wrap gap-4">
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-tighter">Filter Type:</label>
+                        <select id="typeFilter" onchange="renderFiltered()" class="text-xs border rounded p-1.5 bg-slate-50 focus:ring-1 focus:ring-blue-500 outline-none"></select>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-tighter">Filter Emp ID:</label>
+                        <input type="text" id="empIdFilter" onkeyup="renderFiltered()" placeholder="Search ID..." class="text-xs border rounded p-1.5 bg-slate-50 w-32 focus:ring-1 focus:ring-blue-500 outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <div id="output" class="space-y-6 pb-20"></div>
+        </div>
+
+        <!-- Schema Editor Section -->
+        <div id="sectionConfig" class="hidden space-y-6">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                    <div class="flex items-center gap-4">
+                        <h2 class="text-xl font-bold text-slate-800">Schema Editor</h2>
+                        <select id="configRecordSelector" onchange="loadConfigRecord()" class="border border-slate-300 rounded px-3 py-1.5 text-sm bg-white font-bold shadow-sm focus:ring-2 focus:ring-blue-500 outline-none min-w-[220px]"></select>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="showNewRecordModal()" class="px-4 py-2 bg-green-600 text-white rounded text-xs font-bold hover:bg-green-700 transition-all shadow-sm">+ New Type</button>
+                        <button onclick="showDeleteRecordModal()" class="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded text-xs font-bold hover:bg-red-100 transition-all">Delete Current</button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto border border-slate-200 rounded-lg shadow-inner">
+                    <table class="w-full text-left text-sm border-collapse">
+                        <thead class="bg-slate-50 text-slate-600 font-bold uppercase text-[10px]">
+                            <tr>
+                                <th class="p-3 border-b border-r w-12 text-center">#</th>
+                                <th class="p-3 border-b border-r">Field Label</th>
+                                <th class="p-3 border-b border-r">Logic / Format</th>
+                                <th class="p-3 border-b border-r">Workday Source</th>
+                                <th class="p-3 border-b border-r w-24 text-center">Mandatory</th>
+                                <th class="p-3 border-b border-r w-24 text-center">Optional</th>
+                                <th class="p-3 border-b w-12 text-center">Del</th>
+                            </tr>
+                        </thead>
+                        <tbody id="configEditorBody"></tbody>
+                    </table>
+                </div>
+                <div class="mt-4 flex flex-col md:flex-row gap-3">
+                    <button onclick="addField()" class="px-4 py-2 border-2 border-dashed border-slate-300 text-slate-500 rounded-md hover:bg-slate-100 hover:border-slate-400 text-sm font-bold flex-grow transition-all">+ Add New Field Position</button>
+                    <button onclick="showClearAllModal()" class="px-6 py-2 border-2 border-red-200 text-red-600 rounded-md hover:bg-red-50 text-sm font-bold transition-all">Clear All Fields</button>
+                    <button onclick="saveConfigChanges()" class="px-12 py-2 bg-blue-600 text-white rounded-md font-bold shadow-md hover:bg-blue-700 transition-all">Apply & Save Schema</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Guide Section -->
+        <div id="sectionGuide" class="hidden space-y-6">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+                <h2 class="text-2xl font-bold text-slate-800 mb-6">User Guide & Best Practices</h2>
+                
+                <div class="space-y-10">
+                    <!-- General Usage Section -->
+                    <section>
+                        <h3 class="text-lg font-bold text-blue-800 mb-3 border-b pb-2 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            How to Use the Validator
+                        </h3>
+                        <div class="grid md:grid-cols-3 gap-6 text-sm">
+                            <div class="p-4 bg-slate-50 rounded-lg border">
+                                <div class="font-bold mb-2 flex items-center gap-2"><span class="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">1</span> Load Data</div>
+                                <p class="text-slate-600">Upload a data file or paste rows directly into the textarea. Ensure your <span class="font-bold">Delimiter</span> matches the file (Pipe is default).</p>
+                            </div>
+                            <div class="p-4 bg-slate-50 rounded-lg border">
+                                <div class="font-bold mb-2 flex items-center gap-2"><span class="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">2</span> Inspect Results</div>
+                                <p class="text-slate-600">Rows with field count mismatches or empty required fields turn <span class="text-red-600 font-bold">red</span>. Use filters to isolate workers.</p>
+                            </div>
+                            <div class="p-4 bg-slate-50 rounded-lg border">
+                                <div class="font-bold mb-2 flex items-center gap-2"><span class="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs">3</span> Investigation</div>
+                                <p class="text-slate-600">Hover headers to see Mapping Logic and Workday Source to confirm data integrity against technical requirements.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Config Editor Section -->
+                    <section>
+                        <h3 class="text-lg font-bold text-blue-800 mb-3 border-b pb-2 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Using the Schema Editor
+                        </h3>
+                        <p class="text-sm text-slate-600 mb-4">The Schema Editor allows you to customize the validation rules for any pipe-delimited interface.</p>
+                        <ul class="list-disc ml-6 space-y-3 text-sm text-slate-600">
+                            <li><span class="font-bold">Modify Metadata:</span> Edit "Field Label", "Mapping Logic", and "Workday Source" directly in the table. These values appear in the tooltips on the Validator tab.</li>
+                            <li><span class="font-bold">Validation Rules:</span> Check the <span class="font-bold italic">Mandatory</span> box to highlight empty fields in red. Check the <span class="font-bold italic">Optional</span> box to shade the field grey (OK to be null).</li>
+                            <li><span class="font-bold">Manage Records:</span> Use the <span class="font-bold">+ New Type</span> button to add headers or subtypes (e.g., 05, 09). Use <span class="font-bold">Delete Current</span> to remove unused schema definitions.</li>
+                            <li><span class="font-bold">Structure Adjustment:</span> Use <span class="font-bold">+ Add New Field Position</span> to append a column to the end of the record type. Use the <span class="font-bold text-red-500">×</span> button to remove a specific position.</li>
+                            <li><span class="font-bold">Persistence:</span> Click <span class="font-bold">Apply & Save Schema</span> to update the local session logic.</li>
+                        </ul>
+                    </section>
+
+                    <!-- AI Tip Section -->
+                    <section class="bg-indigo-50 p-6 rounded-xl border border-indigo-100 shadow-sm">
+                        <h3 class="text-lg font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            AI Acceleration workflow
+                        </h3>
+                        <p class="text-sm text-indigo-800 mb-4 leading-relaxed">
+                            To quickly set up a new interface schema without manual entry, follow this workflow:
+                        </p>
+                        <ol class="list-decimal ml-6 space-y-3 text-sm text-indigo-900 font-medium">
+                            <li>Define your basic Record Types (e.g., 01, 02) in the <span class="font-bold">Schema Editor</span>.</li>
+                            <li>Use the <span class="font-bold">Export Setup</span> button to save the configuration as a JSON file.</li>
+                            <li>Upload this JSON file to an AI tool (like ChatGPT or Gemini) along with the text from your Technical Design (TD) or BRD tables.</li>
+                            <li>Ask the AI: <span class="italic text-blue-800">"Update the 'logic' and 'source' values in this JSON based on the provided technical documentation for each field position."</span></li>
+                            <li>Re-import the updated JSON file back into this tool via the <span class="font-bold">Import Setup</span> button.</li>
+                        </ol>
+                        <div class="mt-6 p-4 bg-red-100 border border-red-200 rounded-lg shadow-sm">
+                            <p class="text-xs text-red-900 font-bold flex items-center gap-2 mb-1">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" stroke-width="2"/></svg>
+                                SECURITY REQUIREMENT
+                            </p>
+                            <p class="text-xs text-red-800 leading-normal">Before uploading ANY configuration data to external AI tools, you MUST explicitly remove all <span class="underline font-bold">PII (Personally Identifiable Information)</span>, <span class="underline font-bold">copyrighted content</span>, or <span class="underline font-bold">company intellectual property</span>. Only share generic field structures and technical mapping descriptions.</p>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="w-full py-8 border-t border-slate-200 text-center bg-white mt-auto">
+        <p class="text-sm text-slate-400 font-medium">Developed by: <span class="text-slate-800 font-bold">John Rex Antonio</span></p>
+        <p class="text-xs text-slate-500 mt-2 italic">For support or feature requests, contact me via internal <span class="font-bold">IBM Slack</span> or email: <a href="mailto:john.rex.antonio@ibm.com" class="text-blue-600 hover:underline font-bold">john.rex.antonio@ibm.com</a></p>
+    </footer>
+
+    <script>
+        // Core Definitions: Default Configuration from V1.6
+        let DEFINITIONS = {
+            "HD": { name: "Header Record", fields: [
+                { name: "Record Type", logic: "Value = 'HD'", source: "Constant", required: true, optional: false },
+                { name: "File Type", logic: "TEST or PROD", source: "Constant", required: true, optional: false },
+                { name: "Company", logic: "Omnicom", source: "Constant", required: false, optional: false },
+                { name: "Source System", logic: "SuccessFactors_EC", source: "Constant", required: false, optional: false },
+                { name: "Timestamp", logic: "Now", source: "System", required: false, optional: false }
+            ]},
+            "01": { name: "Job Record", fields: [
+                { name: "Record Type", logic: "Value = '01'", source: "Constant", required: true, optional: false },
+                { name: "Employee ID", logic: "ADP Valid ID", source: "ADP EMPL ID", required: true, optional: false },
+                { name: "Effective Date", logic: "MMDDYYYY", source: "Job Eff Date", required: true, optional: false },
+                { name: "HR Department", logic: "Validated Code", source: "Workday Org", required: true, optional: false },
+                { name: "Jobcode", logic: "Validated Code", source: "Job Profile", required: true, optional: false },
+                { name: "Employee Status", logic: "A=Active", source: "Worker Status", required: true, optional: false },
+                { name: "Action", logic: "Event Code", source: "Event", required: true, optional: false },
+                { name: "Reason", logic: "Reason Code", source: "Event Reason", required: false, optional: false },
+                { name: "Work Location", logic: "ADP Code", source: "Location", required: true, optional: false },
+                { name: "Shift", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Regular / Temporary", logic: "R/T", source: "Worker Type", required: true, optional: false },
+                { name: "Full / Part Time", logic: "F/P", source: "Time Type", required: true, optional: false },
+                { name: "FLSA Status", logic: "E/N", source: "FLSA Status", required: false, optional: false },
+                { name: "Officer Code", logic: "Flag", source: "Is NULL", required: false, optional: false },
+                { name: "Company", logic: "ADP Code", source: "Org", required: true, optional: false },
+                { name: "Paygroup", logic: "ADP Code", source: "Pay Group", required: true, optional: false },
+                { name: "File Number", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Employee Type", logic: "ADP Map", source: "Worker Class", required: true, optional: false },
+                { name: "Standard Hours", logic: "99.99", source: "Hours", required: false, optional: false },
+                { name: "EEO Class", logic: "ADP Map", source: "EEO Cat", required: false, optional: false },
+                { name: "Employee Class", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Comp Frequency", logic: "A/H", source: "Comp Freq", required: true, optional: false },
+                { name: "Comp Rate", logic: "Decimal", source: "Base Pay", required: false, optional: false },
+                { name: "Ann Benefits Rate", logic: "Calc", source: "Benefits Rate", required: false, optional: false },
+                { name: "Clock Number (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Data Control (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Payroll Dept (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Home Jobcost Number (~)", logic: "N/A", source: "Is NULL", required: false, optional: false },
+                { name: "Cost Number (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Hourly Rate 2", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Hourly Rate 3", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Rate Type", logic: "1=Salary, 4=Exempt", source: "Translation", required: true, optional: false },
+                { name: "Reporting Loc", logic: "Tax Loc", source: "Location", required: false, optional: false },
+                { name: "Payroll Freq", logic: "ADP Code", source: "Pay Freq", required: true, optional: false },
+                { name: "Workers Comp", logic: "State Map", source: "WC Code", required: false, optional: false },
+                { name: "FLSA Overtime", logic: "Calc", source: "FLSA Code", required: false, optional: false },
+                { name: "Reports To ID", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Union Code", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Union Seniority", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Bargaining Unit", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Barg Unit Sen", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Benefit Program", logic: "Code", source: "Group", required: false, optional: false },
+                { name: "Comp Entry Date", logic: "MMDDYYYY", source: "History", required: false, optional: false },
+                { name: "Pay Group 2", logic: "N/A", source: "Is NULL", required: false, optional: false },
+                { name: "Rt 1", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Payroll Std Hours", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Gross Calc", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Currency Code", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Hourly Rate", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Monthly Rate", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Annual Rate", logic: "Optional", source: "Is NULL", required: false, optional: true }
+            ]},
+            "02": { name: "Personal Data", fields: [
+                { name: "Record Type", logic: "02", source: "Constant", required: true, optional: false },
+                { name: "Employee ID", logic: "ADP ID", source: "Worker", required: true, optional: false },
+                { name: "SSN", logic: "099999999", source: "SSN", required: true, optional: false },
+                { name: "SIN", logic: "Optional US", source: "Is NULL", required: false, optional: true },
+                { name: "First Name", logic: "Legal", source: "First Name", required: true, optional: false },
+                { name: "Middle Name", logic: "Initial", source: "Middle Name", required: false, optional: false },
+                { name: "Last Name", logic: "Legal", source: "Last Name", required: true, optional: false },
+                { name: "Address 1", logic: "Street", source: "Addr 1", required: true, optional: false },
+                { name: "Address 2", logic: "Apt", source: "Addr 2", required: false, optional: false },
+                { name: "City", logic: "City", source: "City", required: true, optional: false },
+                { name: "State", logic: "Code", source: "State", required: false, optional: false },
+                { name: "Zip", logic: "Zip", source: "Postal", required: false, optional: false },
+                { name: "Country", logic: "Code", source: "Country", required: true, optional: false },
+                { name: "Mailing Ind", logic: "Flag", source: "Is NULL", required: false, optional: false },
+                { name: "Mail Addr 1 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Mail Addr 2 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Mail City (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Mail State (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Mail Zip (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Mail Country (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Original Hire", logic: "MMDDYYYY", source: "Hire", required: false, optional: false },
+                { name: "Race", logic: "Map", source: "Race", required: false, optional: false },
+                { name: "Gender", logic: "M/F", source: "Gender", required: false, optional: false },
+                { name: "Marital Status", logic: "Code", source: "Status", required: false, optional: false },
+                { name: "Birth Date", logic: "MMDDYYYY", source: "Birth", required: true, optional: false },
+                { name: "Email 1", logic: "Work", source: "Work Email", required: false, optional: false },
+                { name: "Email 2", logic: "Home", source: "Home Email", required: false, optional: false },
+                { name: "Home Phone", logic: "Contact", source: "Home Phone", required: false, optional: false },
+                { name: "Work Phone", logic: "Contact", source: "Work Phone", required: false, optional: false },
+                { name: "Work Phone Ext (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Cell Phone (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Preferred Name", logic: "Nickname", source: "Preferred", required: false, optional: false },
+                { name: "Ethnic Group", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Education", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Disabled", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Vets 4212", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Vets 100", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Citizen", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Visa", logic: "Optional", source: "Is NULL", required: false, optional: true }
+            ]},
+            "03": { name: "Employment Record", fields: [
+                { name: "Record Type", logic: "03", source: "Constant", required: true, optional: false },
+                { name: "Employee ID", logic: "ADP ID", source: "Worker", required: true, optional: false },
+                { name: "Hire Date", logic: "MMDDYYYY", source: "Hire", required: true, optional: false },
+                { name: "Rehire Date", logic: "MMDDYYYY", source: "Rehire", required: true, optional: false },
+                { name: "Company Sen", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Service Date", logic: "Map", source: "Service", required: false, optional: false },
+                { name: "Term Date", logic: "MMDDYYYY", source: "Term", required: true, optional: false },
+                { name: "Last Day Worked", logic: "Required", source: "Final Day", required: false, optional: false },
+                { name: "Supervisor ID", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Custom 1 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Custom 2 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Custom 3 (~)", logic: "Reach ID", source: "Reach ID", required: false, optional: false },
+                { name: "Custom 4 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Custom 5 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Date A (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Date B (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Date C (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Flag 1 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Flag 2 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Flag 3 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Flag 4 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Flag 5 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Flag 6 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Flag 7 (~)", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Business Title", logic: "Descriptive", source: "Title", required: false, optional: false },
+                { name: "Benefit Eligible", logic: "Calc", source: "Benefits", required: false, optional: false },
+                { name: "FMLA End", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "PTO Accrual Flag", logic: "Optional", source: "Is NULL", required: false, optional: true }
+            ]},
+            "04": { name: "Tax Record", fields: [
+                { name: "Record Type", logic: "Value = '04'", source: "Constant Value", required: true, optional: false },
+                { name: "Employee ID", logic: "Validated against PERS", source: "ADP EMPL ID", required: true, optional: false },
+                { name: "Effective Date", logic: "Format: MMDDYYYY", source: "Tax Eff", required: true, optional: false },
+                { name: "Fed Marital", logic: "S/M/H", source: "Status", required: false, optional: false },
+                { name: "Fed Exemptions", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Fed Addl Amount", logic: "Dollar", source: "Is NULL", required: false, optional: true },
+                { name: "Fed Addl Percent", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Worked-In State", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Worked-In Status*", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Worked-In Exemp*", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Worked-In Addl*", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Worked-In Pct*", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Lived-In State", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Lived-In Status**", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Lived-In Exemp**", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Lived-In Addl**", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Lived-In Pct**", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Health Coverage", logic: "N/A", source: "Is NULL", required: false, optional: false },
+                { name: "NRA flag", logic: "Y/N", source: "Status", required: false, optional: false },
+                { name: "Fed Tax Block", logic: "N/A", source: "Is NULL", required: false, optional: false },
+                { name: "Use Old W4", logic: "N/A", source: "Is NULL", required: false, optional: false },
+                { name: "Other Income", logic: "N/A", source: "Is NULL", required: false, optional: false },
+                { name: "Other Deductions", logic: "N/A", source: "Is NULL", required: false, optional: false },
+                { name: "Dependents Amt", logic: "Dollar", source: "Credit", required: false, optional: false },
+                { name: "Multiple Jobs", logic: "Y/N", source: "Election", required: true, optional: false }
+            ]},
+            "06": { name: "Direct Deposit", fields: [
+                { name: "Record Type", logic: "06", source: "Constant", required: true, optional: false },
+                { name: "Employee ID", logic: "Validated", source: "ADP ID", required: true, optional: false },
+                { name: "Effective Date", logic: "MMDDYYYY", source: "Eff Date", required: true, optional: false },
+                { name: "Drop All Flag", logic: "Y/N", source: "Is NULL", required: true, optional: false },
+                { name: "Deduction Code", logic: "Type", source: "Bank Type", required: true, optional: false },
+                { name: "Full Deposit", logic: "Balance", source: "Is NULL", required: false, optional: false },
+                { name: "Transit Number", logic: "9 Digits", source: "Routing", required: true, optional: false },
+                { name: "Account Number", logic: "Alpha-num", source: "Account", required: true, optional: false },
+                { name: "Deposit Amount", logic: "Optional", source: "Is NULL", required: false, optional: true },
+                { name: "Pre-Note Date", logic: "Optional", source: "Is NULL", required: false, optional: true }
+            ]},
+            "08": { name: "HR User Data", fields: [
+                { name: "Record Type", logic: "Value = '08'", source: "Constant Value", required: true, optional: false },
+                { name: "Employee ID", logic: "Validated", source: "ADP ID", required: true, optional: false },
+                { name: "Effective Date", logic: "MMDDYYYY", source: "Eff Date", required: true, optional: false }
+            ]},
+            "TR": { name: "Trailer Record", fields: [
+                { name: "Record Type", logic: "TR", source: "Constant", required: true, optional: false },
+                { name: "01 Job Count", logic: "Sum", source: "Calc", required: true, optional: false },
+                { name: "02 Pers Count", logic: "Sum", source: "Calc", required: true, optional: false },
+                { name: "03 Emp Count", logic: "Sum", source: "Calc", required: true, optional: false },
+                { name: "04 Tax Count", logic: "Sum", source: "Calc", required: true, optional: false },
+                { name: "05 Ded Count", logic: "0", source: "Constant", required: true, optional: false },
+                { name: "06 Dep Count", logic: "Sum", source: "Calc", required: true, optional: false },
+                { name: "07 Earn Count", logic: "0", source: "Constant", required: true, optional: false },
+                { name: "08 HR Count", logic: "Sum", source: "Calc", required: true, optional: false }
+            ]}
+        };
+
+        for(let i=1; i<=22; i++) DEFINITIONS["08"].fields.push({ name: `User ${i} (~)`, logic: "Optional", source: "Is NULL", required: false, optional: true });
+        DEFINITIONS["08"].fields.push({ name: "User 1 Character (~)", logic: "Optional", source: "Is NULL", required: false, optional: true });
+        DEFINITIONS["08"].fields.push({ name: "User 2 Character (~)", logic: "Optional", source: "Reach ID", required: false, optional: true });
+        DEFINITIONS["08"].fields.push({ name: "User 3 Character (~)", logic: "Optional", source: "Is NULL", required: false, optional: true });
+        DEFINITIONS["08"].fields.push({ name: "User 4 Character (~)", logic: "Optional", source: "Manager Name/ID", required: false, optional: true });
+        for(let i=1; i<=8; i++) DEFINITIONS["08"].fields.push({ name: `User ${i} Date (~)`, logic: "Optional", source: "Is NULL", required: false, optional: true });
+        for(let i=1; i<=7; i++) DEFINITIONS["08"].fields.push({ name: `User ${i} Number (~)`, logic: "Optional", source: "Is NULL", required: false, optional: true });
+
+        let processedData = [];
+        let currentEditingFields = [];
+
+        function switchMainTab(tab) {
+            document.getElementById('sectionValidator').classList.toggle('hidden', tab !== 'validator');
+            document.getElementById('sectionConfig').classList.toggle('hidden', tab !== 'config');
+            document.getElementById('sectionGuide').classList.toggle('hidden', tab !== 'guide');
+            
+            document.getElementById('tabValidator').className = tab === 'validator' ? 'px-6 py-4 text-sm tab-active' : 'px-6 py-4 text-sm text-slate-500 hover:text-blue-600 transition-all';
+            document.getElementById('tabConfig').className = tab === 'config' ? 'px-6 py-4 text-sm tab-active' : 'px-6 py-4 text-sm text-slate-500 hover:text-blue-600 transition-all';
+            document.getElementById('tabGuide').className = tab === 'guide' ? 'px-6 py-4 text-sm tab-active' : 'px-6 py-4 text-sm text-slate-500 hover:text-blue-600 transition-all';
+            
+            updateConfigSelectors();
+            if (tab === 'config') loadConfigRecord();
+            else if (tab === 'validator') initReferenceTable();
+        }
+
+        function updateConfigSelectors() {
+            const selector = document.getElementById('configRecordSelector');
+            const typeFilter = document.getElementById('typeFilter');
+            const refTypeFilter = document.getElementById('refTypeFilter');
+            const sortedKeys = Object.keys(DEFINITIONS).sort();
+            const options = sortedKeys.map(k => `<option value="${k}">${k} - ${DEFINITIONS[k].name}</option>`).join('');
+            if(selector) selector.innerHTML = options;
+            if(typeFilter) typeFilter.innerHTML = `<option value="ALL">All Types</option>` + options + `<option value="UNKNOWN">Unknown/Other</option>`;
+            if(refTypeFilter) refTypeFilter.innerHTML = `<option value="ALL">All Record Types</option>` + options;
+        }
+
+        function loadConfigRecord() {
+            const type = document.getElementById('configRecordSelector').value;
+            if (!type || !DEFINITIONS[type]) return;
+            currentEditingFields = JSON.parse(JSON.stringify(DEFINITIONS[type].fields));
+            renderConfigFields();
+        }
+
+        function renderConfigFields() {
+            const body = document.getElementById('configEditorBody');
+            if (!body) return;
+            body.innerHTML = '';
+            currentEditingFields.forEach((f, i) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="p-2 border-b border-r text-center font-mono text-blue-500 text-xs">${i + 1}</td>
+                    <td class="p-2 border-b border-r"><input type="text" value="${f.name}" onchange="updateField(${i}, 'name', this.value)" class="w-full border rounded p-1 text-xs outline-none focus:ring-1 focus:ring-blue-500"></td>
+                    <td class="p-2 border-b border-r"><input type="text" value="${f.logic || ''}" onchange="updateField(${i}, 'logic', this.value)" class="w-full border rounded p-1 text-xs outline-none focus:ring-1 focus:ring-blue-500"></td>
+                    <td class="p-2 border-b border-r"><input type="text" value="${f.source || ''}" onchange="updateField(${i}, 'source', this.value)" class="w-full border rounded p-1 text-xs outline-none focus:ring-1 focus:ring-blue-500"></td>
+                    <td class="p-2 border-b border-r text-center"><input type="checkbox" ${f.required ? 'checked' : ''} onchange="updateField(${i}, 'required', this.checked)"></td>
+                    <td class="p-2 border-b border-r text-center"><input type="checkbox" ${f.optional ? 'checked' : ''} onchange="updateField(${i}, 'optional', this.checked)"></td>
+                    <td class="p-2 border-b text-center"><button onclick="removeField(${i})" class="text-red-400 hover:text-red-600 transition-colors font-bold">×</button></td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        function updateField(index, key, value) { currentEditingFields[index][key] = value; }
+        function addField() { currentEditingFields.push({ name: "New Field", logic: "", source: "", required: false, optional: false }); renderConfigFields(); }
+        function removeField(index) { currentEditingFields.splice(index, 1); renderConfigFields(); }
+        
+        function showClearAllModal() {
+            showModal("Reset Schema?", `<p class="text-sm text-center text-slate-600">Remove all fields for this record type?</p>`, () => {
+                currentEditingFields = [];
+                renderConfigFields();
+                closeModal();
+            });
+        }
+
+        function saveConfigChanges() {
+            const type = document.getElementById('configRecordSelector').value;
+            if (!type) return;
+            DEFINITIONS[type].fields = JSON.parse(JSON.stringify(currentEditingFields));
+            initReferenceTable();
+            showMessage(`Schema for ${type} applied.`);
+        }
+
+        const modal = document.getElementById('modal-overlay');
+        function showModal(title, contentHtml, onConfirm) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-content').innerHTML = contentHtml;
+            modal.style.display = 'flex';
+            document.getElementById('modal-confirm').onclick = onConfirm;
+            document.getElementById('modal-cancel').onclick = closeModal;
+        }
+
+        function closeModal() { modal.style.display = 'none'; }
+
+        function showNewRecordModal() {
+            const html = `<div><label class="block text-xs font-bold mb-1 text-slate-500 uppercase">Record ID</label><input type="text" id="new-rec-id" class="w-full border rounded p-2 text-sm shadow-sm"></div><div><label class="block text-xs font-bold mb-1 text-slate-500 uppercase">Description</label><input type="text" id="new-rec-name" class="w-full border rounded p-2 text-sm shadow-sm"></div>`;
+            showModal("Add New Record Type", html, () => {
+                const id = document.getElementById('new-rec-id').value.trim();
+                const name = document.getElementById('new-rec-name').value.trim();
+                if(!id) return;
+                DEFINITIONS[id] = { name: name || "Custom", fields: [{ name: "Record Type", logic: `Value='${id}'`, source: "Constant", required: true, optional: false }] };
+                updateConfigSelectors();
+                document.getElementById('configRecordSelector').value = id;
+                loadConfigRecord();
+                closeModal();
+            });
+        }
+
+        function showDeleteRecordModal() {
+            const type = document.getElementById('configRecordSelector').value;
+            if(!type) return;
+            showModal("Permanently Delete Type?", `<p class="text-sm text-center">Permanently remove definition for <strong>${type}</strong>?</p>`, () => {
+                delete DEFINITIONS[type];
+                updateConfigSelectors();
+                loadConfigRecord();
+                closeModal();
+            });
+        }
+
+        function showMessage(msg) {
+            const m = document.createElement('div');
+            m.className = "fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-8 py-3 rounded-lg shadow-2xl z-[11000] text-sm font-bold";
+            m.innerText = msg;
+            document.body.appendChild(m);
+            setTimeout(() => m.remove(), 2500);
+        }
+
+        function initReferenceTable() {
+            const tbody = document.getElementById('referenceTableBody');
+            if(!tbody) return;
+            tbody.innerHTML = '';
+            Object.entries(DEFINITIONS).forEach(([type, def]) => {
+                def.fields.forEach((field, index) => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-blue-50 border-b border-slate-100 transition-colors";
+                    tr.dataset.searchable = `${type} ${field.name} ${field.logic} ${field.source}`.toLowerCase();
+                    tr.dataset.type = type;
+                    tr.innerHTML = `
+                        <td class="p-1.5 border-r font-bold text-blue-600 text-center">${type}</td>
+                        <td class="p-1.5 border-r text-slate-400 font-mono text-center">${index + 1}</td>
+                        <td class="p-1.5 border-r font-semibold">${field.name}</td>
+                        <td class="p-1.5 border-r italic text-slate-600 text-center">${field.logic || ''}</td>
+                        <td class="p-1.5 border-r text-center">${field.source || ''}</td>
+                        <td class="p-1.5 border-r text-center">${field.required ? '<span class="text-red-500 font-bold">*</span>' : ''}</td>
+                        <td class="p-1.5 text-center">${field.optional ? '<span class="text-slate-400 font-bold">O</span>' : ''}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            });
+        }
+
+        function filterRefTable() {
+            const query = document.getElementById('refSearch').value.toLowerCase();
+            const selectedType = document.getElementById('refTypeFilter').value;
+            const rows = document.querySelectorAll('#referenceTableBody tr');
+            rows.forEach(row => {
+                const matchesSearch = row.dataset.searchable.includes(query);
+                const matchesType = selectedType === 'ALL' || row.dataset.type === selectedType;
+                row.style.display = (matchesSearch && matchesType) ? '' : 'none';
+            });
+        }
+
+        const tooltip = document.getElementById('global-tooltip');
+        function showTooltip(e, logic, source) {
+            tooltip.innerHTML = `<strong>Mapping Logic:</strong> ${logic || 'N/A'}<br><br><strong>Workday Source:</strong> ${source || 'N/A'}`;
+            tooltip.style.display = 'block';
+            updateTooltipPos(e);
+            setTimeout(() => tooltip.style.opacity = '1', 10);
+        }
+
+        function updateTooltipPos(e) {
+            const padding = 15;
+            let x = e.clientX + padding;
+            let y = e.clientY + padding;
+            if (x + tooltip.offsetWidth > window.innerWidth) x = e.clientX - tooltip.offsetWidth - padding;
+            if (y + tooltip.offsetHeight > window.innerHeight) y = e.clientY - tooltip.offsetHeight - padding;
+            tooltip.style.left = `${x}px`; tooltip.style.top = `${y}px`;
+        }
+
+        function hideTooltip() { tooltip.style.opacity = '0'; setTimeout(() => tooltip.style.display = 'none', 150); }
+
+        function exportConfig() {
+            const data = JSON.stringify(DEFINITIONS, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `adp_v21_config.json`;
+            a.click();
+        }
+
+        function importConfig(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    DEFINITIONS = JSON.parse(event.target.result);
+                    updateConfigSelectors();
+                    initReferenceTable();
+                    showMessage("Setup Imported.");
+                } catch(err) { showMessage("Error: Invalid JSON."); }
+            };
+            reader.readAsText(file);
+        }
+
+        function loadDataFromFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                document.getElementById('rawInput').value = event.target.result;
+                processData();
+            };
+            reader.readAsText(file);
+        }
+
+        function processData() {
+            const raw = document.getElementById('rawInput').value.trim();
+            if (!raw) return;
+            let delimiter = document.getElementById('delimiterSelector').value;
+            if (delimiter === "\\t") delimiter = "\t";
+            const lines = raw.split(/\r?\n/);
+            processedData = lines.map((line, index) => {
+                const values = line.split(delimiter);
+                const recType = values[0];
+                const def = DEFINITIONS[recType] || null;
+                return { lineIndex: index + 1, type: recType, raw: line, values: values, definition: def, hasError: def ? values.length !== def.fields.length : true };
+            });
+            document.getElementById('resultsHeader').classList.remove('hidden');
+            updateStats();
+            renderFiltered();
+        }
+
+        function updateStats() {
+            const total = processedData.length;
+            const errors = processedData.filter(d => d.hasError).length;
+            document.getElementById('statTotal').innerText = `${total} Records Found`;
+            document.getElementById('statErrors').innerText = `${errors} Length Mismatches`;
+        }
+
+        function renderFiltered() {
+            const typeFilter = document.getElementById('typeFilter').value;
+            const empIdFilter = document.getElementById('empIdFilter').value.trim().toLowerCase();
+            const container = document.getElementById('output');
+            container.innerHTML = '';
+            const filtered = processedData.filter(item => {
+                let matchesType = typeFilter === 'ALL' ? true : (typeFilter === 'UNKNOWN' ? !DEFINITIONS[item.type] : item.type === typeFilter);
+                let matchesEmpId = empIdFilter === "" || (item.values[1] || "").toLowerCase().includes(empIdFilter);
+                return matchesType && matchesEmpId;
+            });
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="text-center p-12 bg-white rounded border italic text-slate-400">No records found.</div>';
+                return;
+            }
+            filtered.forEach(item => container.appendChild(createRecordCard(item)));
+        }
+
+        function createRecordCard(item) {
+            const wrapper = document.createElement('div');
+            wrapper.className = `bg-white rounded-xl shadow-sm border ${item.hasError ? 'border-red-300' : 'border-slate-200'} overflow-hidden transition-all`;
+            const header = document.createElement('div');
+            header.className = `px-4 py-3 flex justify-between items-center ${item.hasError ? 'bg-red-50' : 'bg-slate-50'} border-b`;
+            const title = item.definition ? item.definition.name : 'Unknown';
+            header.innerHTML = `<div><span class="font-bold text-slate-700">Line ${item.lineIndex}: ${title}</span><span class="ml-2 text-xs text-slate-500 bg-slate-200 px-2 py-0.5 rounded font-bold uppercase">${item.type}</span></div><div class="text-xs ${item.hasError ? 'text-red-600 font-bold' : 'text-slate-500'}">${item.values.length} fields ${item.hasError ? '(Mismatch!)' : ''}</div>`;
+            const body = document.createElement('div');
+            body.className = "p-4 overflow-x-auto";
+            const table = document.createElement('table');
+            table.className = "w-full text-xs text-left border-collapse";
+            const trHead = document.createElement('tr');
+            trHead.className = "text-slate-500 font-medium border-b bg-slate-50";
+            const trBody = document.createElement('tr');
+            trBody.className = "font-mono text-slate-800 bg-white";
+            const fieldDefs = item.definition ? item.definition.fields : [];
+            const maxLen = Math.max(fieldDefs.length, item.values.length);
+            for (let i = 0; i < maxLen; i++) {
+                const th = document.createElement('th');
+                let stickyClass = i === 0 ? "sticky-col-1 bg-slate-50" : (i === 1 ? "sticky-col-2 bg-slate-50" : "");
+                th.className = `p-2 min-w-[130px] align-top border-r ${stickyClass}`;
+                const f = fieldDefs[i] || { name: `Field ${i+1}`, logic: "N/A", source: "Extra", required: false, optional: false };
+                const inner = document.createElement('div');
+                inner.className = "header-cell-inner";
+                inner.innerHTML = `<div class="text-[10px] text-blue-500 font-mono mb-1">${i + 1}</div><span>${f.name}${f.required ? ' <span class="text-red-500">*</span>' : ''}</span>`;
+                inner.onmouseenter = (e) => showTooltip(e, f.logic, f.source);
+                inner.onmousemove = (e) => updateTooltipPos(e);
+                inner.onmouseleave = hideTooltip;
+                th.appendChild(inner);
+                const td = document.createElement('td');
+                let bodyStickyClass = i === 0 ? "sticky-col-1 bg-white" : (i === 1 ? "sticky-col-2 bg-white" : "");
+                td.className = `p-2 min-w-[130px] break-words align-top border-l ${bodyStickyClass}`;
+                const val = item.values[i];
+                const isEmpty = !val || val.trim() === '';
+                if (isEmpty) {
+                    td.innerHTML = `<span class="empty-value">empty</span>`;
+                    if (f.required) td.classList.add('bg-red-100');
+                    else if (f.optional) td.classList.add('bg-slate-100');
+                } else {
+                    td.innerText = val;
+                    if (f.optional) td.classList.add('bg-slate-50', 'text-slate-500');
+                }
+                if (i >= fieldDefs.length) { th.classList.add('text-red-500', 'font-bold'); td.classList.add('bg-red-50'); }
+                trHead.appendChild(th);
+                trBody.appendChild(td);
+            }
+            table.appendChild(trHead);
+            table.appendChild(trBody);
+            body.appendChild(table);
+            wrapper.appendChild(header);
+            wrapper.appendChild(body);
+            return wrapper;
+        }
+
+        function loadSampleData() {
+            document.getElementById('rawInput').value = `HD|PROD|Omnicom|SuccessFactors_EC|02232026 22:38:57\n01|10045|02192026|OMD000|EC000|A|HIR|HIR|NY1ST||R|F|E|N|ABCD|UHA||S|40|N|N|A|100000.0000|||||1234NYAN1234||||4|NY1ST|3|8742|N||||||abc|02192026|N|||||||\n02|10045|999999991||Sally|Brad|Joe|1842 Brookside Avenue|Cornerlot Central Avenue|Albany|NY|12209|USA|N|||||||02012026|9|F|N|02131989|sally@noemail.com|sally.joe@abc.com|525/270‑5584|235/746‑2090|||Sallee Joes|||||||\nTR|1|1|0|0|0|0|0|0`;
+            processData();
+            showMessage("Sample Loaded.");
+        }
+
+        function clearAll() {
+            document.getElementById('rawInput').value = '';
+            document.getElementById('output').innerHTML = '';
+            document.getElementById('resultsHeader').classList.add('hidden');
+        }
+
+        window.onload = () => {
+            updateConfigSelectors();
+            initReferenceTable();
+        };
+    </script>
+</body>
+</html>
