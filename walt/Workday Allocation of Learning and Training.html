@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workday Training Manager - Enterprise Edition</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script>window.react = window.React;</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore-compat.js"></script>
+    <script src="https://unpkg.com/lucide-react@0.460.0/dist/umd/lucide-react.js"></script>
+    <!-- CSV Parser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        @media (max-width: 1024px) {
+            .sidebar-transition { transition: transform 0.3s ease-in-out; }
+        }
+        
+        .sticky-header { position: sticky; top: 0; background: white; z-index: 20; }
+        .category-row { position: sticky; top: 37px; z-index: 10; background: #f8fafc; }
+        
+        /* Enterprise Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+        const { 
+            Layout, Book, Shield, User, CreditCard, CheckCircle, 
+            XCircle, Clock, Plus, BarChart, ChevronRight, AlertTriangle, Cloud, RefreshCw, Database, Lock, LogOut, Mail, Users, Send, Download, Upload, Filter, Search, Trash2, Menu, X
+        } = LucideReact || {};
+
+        const Icon = ({ component: Component, size = 16, className = "" }) => {
+            if (!Component) return null;
+            return <Component size={size} className={className} />;
+        };
+
+        // --- CONFIGURATION ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBejfIxMKn2SeI6X5nYhwj6q6GG5fRihSM",
+            authDomain: "training-manager-2a136.firebaseapp.com",
+            projectId: "training-manager-2a136",
+            storageBucket: "training-manager-2a136.firebasestorage.app",
+            messagingSenderId: "1053283231725",
+            appId: "1:1053283231725:web:71273d1dcc23037e52a9e4"
+        };
+        const artifactId = typeof __app_id !== 'undefined' ? __app_id : 'training-manager-v1';
+        const ADMIN_EMAIL_PRIMARY = 'john.rex.antonio@ibm.com';
+        const ADMIN_EMAIL_SECONDARY = 'admin1@ibm.com';
+
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // Logical Order from PDF
+        const AREA_ORDER = [
+            "HCM", "Student", "Education and Government", "Financial Management", 
+            "Payroll and Reporting", "Developer and Data Management", "Methodology & Cross-App"
+        ];
+
+        const SEED_DATA_CSV = `Product Area,Program Name,Certification Type,Offering,Offering Type,Required,Training Cost,Training Units
+HCM,Workday Pro HCM Core Services Certification,Entry,HCM Core for Administrators,Course,Required,3200,4
+HCM,Workday Pro HCM Core Services Certification,Entry,Workday Pro HCM Core Certification Exam,Exam,Required,800,1
+HCM,Workday Pro Benefits Services Certification,Entry,Benefits for Administrators,Course,Required,4000,5
+HCM,Workday Pro Benefits Services Certification,Entry,Workday Pro Benefits Certification Exam,Exam,Required,800,1
+Financial Management,Workday Pro Financial Management Services Certification,Entry,Financial Management for Administrators,Course,Required,4000,5
+Financial Management,Workday Pro Financial Management Services Certification,Entry,Workday Pro Financials Certification Exam,Exam,Required,800,1
+Payroll and Reporting,Workday Pro Payroll Services Certification,Entry,Payroll for Administrators,Course,Required,4400,5.5
+Payroll and Reporting,Workday Pro Payroll Services Certification,Entry,Workday Pro Payroll Certification Exam,Exam,Required,800,1
+Developer and Data Management,Workday Pro Integrations Services Certification,Entry,Creating and Securing Integrations,Course,Required,3200,4
+Developer and Data Management,Workday Pro Integrations Services Certification,Entry,Workday Pro Integrations Certification Exam,Exam,Required,800,1
+Methodology & Cross-App,Workday Pro Deployment Launchpad Services Certification,Entry,Workday Deployment Launchpad,Course,Optional,4000,5`;
+
+        const App = () => {
+            // States
+            const [isAuthed, setIsAuthed] = useState(false);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [authStep, setAuthStep] = useState('email');
+            const [loginEmail, setLoginEmail] = useState('');
+            const [pin, setPin] = useState('');
+            const [role, setRole] = useState('employee');
+            const [view, setView] = useState('dashboard');
+            const [courses, setCourses] = useState([]);
+            const [allocations, setAllocations] = useState([]);
+            const [enrollments, setEnrollments] = useState([]);
+            const [accessRequests, setAccessRequests] = useState([]);
+            const [allManagers, setAllManagers] = useState([]);
+            const [allEmployees, setAllEmployees] = useState([]);
+            const [message, setMessage] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [rejectingEnrollment, setRejectingEnrollment] = useState(null);
+            const [rejectionReason, setRejectionReason] = useState('');
+            const [searchTerm, setSearchSearchTerm] = useState('');
+            const [areaFilter, setAreaFilter] = useState('All');
+            const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+            const fileInputRef = useRef(null);
+
+            // --- COMPUTED DATA (MOVED UP) ---
+            const myAllocations = useMemo(() => {
+                if (!currentUser) return [];
+                if (role === 'admin') return allocations;
+                return allocations.filter(a => a.managerEmail === currentUser.email);
+            }, [allocations, currentUser, role]);
+
+            const totalBalance = useMemo(() => {
+                const now = new Date().toISOString().split('T')[0];
+                return myAllocations.filter(a => a.expiry >= now).reduce((sum, a) => sum + (a.approved - a.used), 0);
+            }, [myAllocations]);
+
+            const groupedCourses = useMemo(() => {
+                const filtered = courses.filter(c => {
+                    const matchSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                      c.productArea?.toLowerCase().includes(searchTerm.toLowerCase());
+                    const matchArea = areaFilter === 'All' || c.productArea === areaFilter;
+                    return matchSearch && matchArea;
+                });
+                const groups = {};
+                filtered.forEach(c => {
+                    if (!groups[c.productArea]) groups[c.productArea] = [];
+                    groups[c.productArea].push(c);
+                });
+                return groups;
+            }, [courses, searchTerm, areaFilter]);
+
+            const areaOptions = useMemo(() => {
+                const areas = [...new Set(courses.map(c => c.productArea))].filter(Boolean);
+                return ["All", ...areas.sort((a,b) => AREA_ORDER.indexOf(a) - AREA_ORDER.indexOf(b))];
+            }, [courses]);
+
+            // --- CORE HANDLERS ---
+            const showMsg = (txt, type = 'success') => { setMessage({ txt, type }); setTimeout(() => setMessage(null), 3000); };
+
+            const changeView = (v) => { setView(v); setIsMobileMenuOpen(false); };
+
+            const handleLogout = () => {
+                setIsAuthed(false); setCurrentUser(null); setAuthStep('email');
+                setLoginEmail(''); setPin(''); setView('dashboard');
+                setIsMobileMenuOpen(false); showMsg("Session closed safely", "success");
+            };
+
+            const handleLogin = async () => {
+                if (!loginEmail) return showMsg("Email required", "error");
+                setLoading(true);
+                try {
+                    const data = db.collection('artifacts').doc(artifactId).collection('public').doc('data');
+                    const normalizedEmail = loginEmail.toLowerCase();
+                    
+                    if (normalizedEmail === ADMIN_EMAIL_PRIMARY || normalizedEmail === ADMIN_EMAIL_SECONDARY) {
+                        const adminDoc = await data.collection('admins').doc(normalizedEmail).get();
+                        setRole('admin');
+                        setAuthStep(!adminDoc.exists || !adminDoc.data().isSetup ? 'setup-pin' : 'pin');
+                    } else {
+                        const managerDoc = await data.collection('managers').doc(normalizedEmail).get();
+                        if (managerDoc.exists) {
+                            setRole('manager');
+                            setAuthStep(!managerDoc.data().isSetup ? 'setup-pin' : 'pin');
+                        } else {
+                            const employeeDoc = await data.collection('employees').doc(normalizedEmail).get();
+                            if (employeeDoc.exists) {
+                                setRole('employee');
+                                setAuthStep(!employeeDoc.data().isSetup ? 'setup-pin' : 'pin');
+                            } else setAuthStep('request-choice');
+                        }
+                    }
+                } catch (err) { showMsg("Sync error", "error"); }
+                setLoading(false);
+            };
+
+            const verifyPin = async () => {
+                const coll = role === 'admin' ? 'admins' : role === 'manager' ? 'managers' : 'employees';
+                try {
+                    const doc = await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection(coll).doc(loginEmail).get();
+                    if (doc.data()?.pin === pin) { setCurrentUser({ email: loginEmail, role }); setIsAuthed(true); }
+                    else showMsg("Invalid PIN", "error");
+                } catch(e) { showMsg("Identity error", "error"); }
+            };
+
+            const setupPin = async () => {
+                if (pin.length < 4) return showMsg("Min 4 digits", "error");
+                const coll = role === 'admin' ? 'admins' : role === 'manager' ? 'managers' : 'employees';
+                try {
+                    await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection(coll).doc(loginEmail).set({ email: loginEmail, pin, isSetup: true }, { merge: true });
+                    setCurrentUser({ email: loginEmail, role }); setIsAuthed(true);
+                } catch(e) { showMsg("Setup failed", "error"); }
+            };
+
+            const handleEnrollRequest = async (course) => {
+                const isDuplicate = enrollments.some(e => e.learnerEmail === currentUser.email && e.courseName === course.name && !['Rejected', 'Canceled'].includes(e.status));
+                if (isDuplicate) return showMsg("Active request exists", "error");
+                try {
+                    await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('enrollments').add({
+                        courseName: course.name, learnerEmail: currentUser.email, cost: course.cost, status: 'PendingApproval', requestedDate: new Date().toISOString().split('T')[0]
+                    });
+                    showMsg("Enrollment requested");
+                } catch(e) { showMsg("Request failed", "error"); }
+            };
+
+            const approveEnrollment = async (e) => {
+                if (totalBalance < e.cost) return showMsg("Insufficient Balance", "error");
+                try {
+                    let rem = e.cost;
+                    const mine = [...myAllocations].sort((a,b) => a.expiry.localeCompare(b.expiry));
+                    for (const a of mine) {
+                        if (rem <= 0) break;
+                        const avail = a.approved - a.used;
+                        if (avail <= 0) continue;
+                        const deduct = Math.min(avail, rem);
+                        await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('allocations').doc(a.id).update({ used: a.used + deduct });
+                        rem -= deduct;
+                    }
+                    await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('enrollments').doc(e.id).update({ status: 'Enrolled', approvedBy: currentUser.email });
+                    showMsg("Approved");
+                } catch(err) { showMsg("Approval failed", "error"); }
+            };
+
+            const cancelEnrollment = async (e) => {
+                if (!window.confirm("Cancel? Credits will be restored to manager pool.")) return;
+                try {
+                    const dataRef = db.collection('artifacts').doc(artifactId).collection('public').doc('data');
+                    if (e.status === 'Enrolled' && e.approvedBy) {
+                        const allocSnap = await dataRef.collection('allocations').get();
+                        const target = allocSnap.docs.map(d => ({ id: d.id, ...d.data() })).find(a => a.managerEmail === e.approvedBy);
+                        if (target) await dataRef.collection('allocations').doc(target.id).update({ used: Math.max(0, target.used - e.cost) });
+                    }
+                    await dataRef.collection('enrollments').doc(e.id).update({ status: 'Canceled', canceledAt: new Date().toISOString() });
+                    showMsg("Canceled");
+                } catch (err) { showMsg("Error", "error"); }
+            };
+
+            const submitRejection = async () => {
+                if (!rejectionReason) return showMsg("Reason required", "error");
+                await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('enrollments').doc(rejectingEnrollment.id).update({
+                    status: 'Rejected', rejectionReason, processedBy: currentUser.email
+                });
+                setRejectingEnrollment(null); setRejectionReason(''); showMsg("Rejected");
+            };
+
+            const processRequest = async (req, approve) => {
+                const targetCollection = req.type === 'manager' ? 'managers' : 'employees';
+                if (approve) await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection(targetCollection).doc(req.email).set({ email: req.email, isSetup: false, pin: "" });
+                await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('accessRequests').doc(req.id).delete();
+                showMsg(approve ? "Access granted" : "Dismissed");
+            };
+
+            const sendAccessRequest = async (requestedRole) => {
+                await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('accessRequests').doc(loginEmail).set({ email: loginEmail, type: requestedRole, requestedAt: new Date().toISOString(), status: 'pending' });
+                setRole(requestedRole); setAuthStep('request-sent');
+            };
+
+            const resetUserPin = async (email, targetRole) => {
+                const coll = targetRole === 'manager' ? 'managers' : 'employees';
+                await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection(coll).doc(email).update({ isSetup: false, pin: "" });
+                showMsg("Identity reset");
+            };
+
+            const inviteUsers = async (emailsStr, targetRole) => {
+                const emails = emailsStr.split(',').map(e => e.trim().toLowerCase()).filter(e => e.includes('@'));
+                const coll = targetRole === 'manager' ? 'managers' : 'employees';
+                for (const email of emails) await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection(coll).doc(email).set({ email, isSetup: false, pin: "" });
+                showMsg(`Identity created for ${emails.length} users`);
+            };
+
+            const exportCatalog = () => {
+                const csv = Papa.unparse(courses.map(c => ({
+                    'Product Area': c.productArea, 'Program Name': c.programName, 'Certification Type': c.certificationType,
+                    'Offering': c.name, 'Offering Type': c.offeringType, 'Required': c.required,
+                    'Training Cost': c.trainingCost, 'Training Units': c.cost
+                })));
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+                link.download = `Workday_Catalog.csv`; link.click();
+            };
+
+            const importCatalog = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                Papa.parse(file, {
+                    header: true, skipEmptyLines: true,
+                    complete: async (results) => {
+                        const batch = db.batch();
+                        const ref = db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('courses');
+                        results.data.forEach(row => {
+                            if (!row.Offering) return;
+                            const id = row.Offering.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                            batch.set(ref.doc(id), {
+                                productArea: row['Product Area'], programName: row['Program Name'], certificationType: row['Certification Type'],
+                                name: row['Offering'], offeringType: row['Offering Type'], required: row['Required'],
+                                trainingCost: parseFloat(row['Training Cost']) || 0, cost: parseFloat(row['Training Units']) || 0
+                            });
+                        });
+                        await batch.commit(); showMsg("Cloud sync successful");
+                    }
+                });
+            };
+
+            const seedSystem = async () => {
+                showMsg("Initializing master core...", "info");
+                const data = db.collection('artifacts').doc(artifactId).collection('public').doc('data');
+                await data.collection('admins').doc('john.rex.antonio@ibm.com').set({ email: 'john.rex.antonio@ibm.com', pin: '1234', isSetup: true });
+                await data.collection('admins').doc('admin1@ibm.com').set({ email: 'admin1@ibm.com', pin: '1234', isSetup: true });
+                await data.collection('managers').doc('manager1@ibm.com').set({ email: 'manager1@ibm.com', pin: '1234', isSetup: true });
+                await data.collection('employees').doc('employee1@ibm.com').set({ email: 'employee1@ibm.com', pin: '1234', isSetup: true });
+                Papa.parse(SEED_DATA_CSV, {
+                    header: true,
+                    complete: async (res) => {
+                        const ref = data.collection('courses');
+                        for (const row of res.data) {
+                            if (!row.Offering) continue;
+                            const id = row.Offering.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                            await ref.doc(id).set({
+                                productArea: row['Product Area'], programName: row['Program Name'], certificationType: row['Certification Type'],
+                                name: row['Offering'], offeringType: row['Offering Type'], required: row['Required'],
+                                trainingCost: parseFloat(row['Training Cost']), cost: parseFloat(row['Training Units'])
+                            });
+                        }
+                        showMsg("Infrastructure Ready");
+                    }
+                });
+            };
+
+            // --- DATA SYNC ---
+            useEffect(() => { const initAuth = async () => { try { await auth.signInAnonymously(); } catch(e){} }; initAuth(); }, []);
+            useEffect(() => {
+                if (!isAuthed) return;
+                const dataRef = db.collection('artifacts').doc(artifactId).collection('public').doc('data');
+                const unsubCourses = dataRef.collection('courses').onSnapshot(snap => setCourses(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+                const unsubEnroll = dataRef.collection('enrollments').onSnapshot(snap => setEnrollments(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+                let unsubAlloc = role !== 'employee' ? dataRef.collection('allocations').onSnapshot(snap => setAllocations(snap.docs.map(d => ({ id: d.id, ...d.data() })))) : () => {};
+                let unsubGov = (role === 'admin' || role === 'manager') ? dataRef.collection('accessRequests').onSnapshot(snap => setAccessRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })))) : () => {};
+                let unsubManagers = role === 'admin' ? dataRef.collection('managers').onSnapshot(snap => setAllManagers(snap.docs.map(d => ({ id: d.id, ...d.data() })))) : () => {};
+                let unsubEmployees = (role === 'manager' || role === 'admin') ? dataRef.collection('employees').onSnapshot(snap => setAllEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })))) : () => {};
+                setLoading(false);
+                return () => { unsubCourses(); unsubEnroll(); unsubAlloc(); unsubGov(); unsubManagers(); unsubEmployees(); };
+            }, [isAuthed, role]);
+
+            // --- UI RENDER ---
+            if (!isAuthed) return (
+                <div className="h-screen flex items-center justify-center bg-slate-900 px-4">
+                    <div className="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl animate-in zoom-in duration-300">
+                        <div className="text-center mb-8">
+                            <div className="inline-block p-4 bg-indigo-600 text-white rounded-2xl mb-4 shadow-lg"><Icon component={Shield} size={32}/></div>
+                            <h2 className="text-2xl font-bold text-slate-900 tracking-tight leading-none">Workday Learning</h2>
+                            <p className="text-slate-400 text-xs font-semibold uppercase tracking-widest mt-1">Certification Portal</p>
+                        </div>
+                        {authStep === 'email' && (
+                            <div className="space-y-4">
+                                <div className="relative"><Icon component={Mail} size={16} className="absolute left-3.5 top-3.5 text-slate-300"/><input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value.toLowerCase())} className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Work Email"/></div>
+                                <button onClick={handleLogin} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 active:scale-95 transition-all">Sign In</button>
+                                <div className="p-3 bg-slate-50 rounded-lg text-[10px] text-slate-400 font-bold uppercase text-center border border-slate-100 italic tracking-widest">Initial PIN: 1234</div>
+                            </div>
+                        )}
+                        {authStep === 'request-choice' && (
+                            <div className="space-y-4 text-center">
+                                <div className="p-4 bg-amber-50 rounded-xl text-xs text-amber-700 font-medium italic">Identity unknown. Request access?</div>
+                                <div className="grid grid-cols-2 gap-3"><button onClick={() => sendAccessRequest('employee')} className="py-3 bg-slate-100 rounded-xl text-[10px] font-bold uppercase hover:bg-slate-200 transition-colors">Employee</button><button onClick={() => sendAccessRequest('manager')} className="py-3 bg-slate-100 rounded-xl text-[10px] font-bold uppercase hover:bg-slate-200 transition-colors">Manager</button></div>
+                                <button onClick={() => setAuthStep('email')} className="text-[10px] font-bold text-slate-400 uppercase mt-2 underline">Back</button>
+                            </div>
+                        )}
+                        {(authStep === 'pin' || authStep === 'setup-pin') && (
+                            <div className="space-y-4">
+                                <div className="p-3 bg-indigo-50 rounded-xl text-[11px] text-indigo-700 font-medium text-center">{authStep === 'setup-pin' ? "Cloud Setup: Set a 4-6 digit access PIN." : "Enter Secure Access PIN"}</div>
+                                <div className="relative"><Icon component={Lock} size={16} className="absolute left-3.5 top-3.5 text-slate-300"/><input type="password" value={pin} onChange={e => setPin(e.target.value)} className="w-full pl-11 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm tracking-[1.5em] font-bold focus:ring-2 focus:ring-indigo-500" placeholder="••••" maxLength={6}/></div>
+                                <button onClick={authStep === 'pin' ? verifyPin : setupPin} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-all">Verify</button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen bg-slate-50 flex flex-col relative overflow-hidden text-sm">
+                    <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-2.5 flex justify-between items-center sticky top-0 z-40 shadow-sm">
+                        <div className="flex items-center space-x-3 sm:space-x-4">
+                            <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="lg:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"><Icon component={Menu} size={20}/></button>
+                            <div className="bg-indigo-600 p-1.5 rounded-lg text-white shadow-sm"><Icon component={Shield} size={18}/></div>
+                            <div className="hidden xs:block"><h1 className="font-bold text-xs sm:text-sm text-slate-900 leading-none">Training Portal</h1><p className="text-[9px] uppercase tracking-widest text-indigo-500 font-extrabold mt-1">{role} access</p></div>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                            <div className="text-right hidden md:block"><p className="text-[10px] font-bold text-slate-800">{currentUser.email}</p><p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest">Active session</p></div>
+                            <button onClick={handleLogout} className="p-2 sm:p-2.5 bg-slate-50 border border-slate-100 rounded-lg text-slate-400 hover:text-red-500 transition-all shadow-inner"><Icon component={LogOut} size={16}/></button>
+                        </div>
+                    </header>
+
+                    {message && (
+                        <div className={`fixed top-14 right-4 sm:right-6 z-[60] px-4 py-2.5 rounded-lg shadow-xl text-white text-[10px] font-bold uppercase tracking-wide flex items-center space-x-2 animate-in slide-in-from-right border-b-4 ${message.type === 'error' ? 'bg-red-500 border-red-700' : message.type === 'info' ? 'bg-sky-500 border-sky-700' : 'bg-emerald-500 border-emerald-700'}`}>
+                           <Icon component={message.type === 'error' ? XCircle : CheckCircle} size={14}/><span>{message.txt}</span>
+                        </div>
+                    )}
+
+                    <div className="flex flex-1 overflow-hidden relative">
+                        {isMobileMenuOpen && <div onClick={() => setIsMobileMenuOpen(false)} className="lg:hidden fixed inset-0 bg-slate-900/40 z-40 backdrop-blur-sm transition-all duration-300"></div>}
+                        <nav className={`sidebar-transition fixed lg:relative lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} z-50 lg:z-auto w-64 lg:w-52 bg-white border-r border-slate-200 p-3 h-full flex flex-col space-y-1 shadow-2xl lg:shadow-none`}>
+                            <button onClick={() => changeView('dashboard')} className={`flex items-center space-x-3 p-2 rounded-lg text-[11px] font-bold transition-all ${view === 'dashboard' ? 'bg-indigo-50 text-indigo-600 shadow-sm shadow-indigo-50' : 'text-slate-500 hover:bg-slate-50'}`}><Icon component={Layout} size={14}/> <span>Dashboard</span></button>
+                            <button onClick={() => changeView('catalog')} className={`flex items-center space-x-3 p-2 rounded-lg text-[11px] font-bold transition-all ${view === 'catalog' ? 'bg-indigo-50 text-indigo-600 shadow-sm shadow-indigo-50' : 'text-slate-500 hover:bg-slate-50'}`}><Icon component={Book} size={14}/> <span>Catalog</span></button>
+                            {(role === 'admin' || role === 'manager') && (
+                                <button onClick={() => changeView('governance')} className={`flex items-center space-x-3 p-2 rounded-lg text-[11px] font-bold transition-all ${view === 'governance' ? 'bg-indigo-50 text-indigo-600 shadow-sm shadow-indigo-50' : 'text-slate-500 hover:bg-slate-50'}`}><Icon component={Shield} size={14}/> <span>Governance</span></button>
+                            )}
+                            {role === 'admin' && (
+                                <button onClick={() => changeView('admin')} className={`flex items-center space-x-3 p-2 rounded-lg text-[11px] font-bold transition-all ${view === 'admin' ? 'bg-indigo-50 text-indigo-600 shadow-sm shadow-indigo-50' : 'text-slate-500 hover:bg-slate-50'}`}><Icon component={BarChart} size={14}/> <span>Control Panel</span></button>
+                            )}
+                            {role !== 'employee' && (
+                                <div className="mt-auto p-4 bg-slate-900 rounded-xl text-white relative overflow-hidden group shadow-lg">
+                                    <div className="absolute -top-2 -right-2 opacity-5"><Icon component={CreditCard} size={50} /></div>
+                                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">Managed units</p>
+                                    <div className="text-xl font-black mb-1.5 tracking-tight leading-none">{totalBalance.toFixed(1)} <span className="text-[9px] opacity-40 uppercase ml-0.5 font-bold tracking-normal">Units</span></div>
+                                    <div className="text-[8px] bg-indigo-600/30 px-2.5 py-0.5 rounded-full font-bold uppercase border border-white/5 inline-block">{myAllocations.length} Active Buckets</div>
+                                </div>
+                            )}
+                        </nav>
+
+                        <main className="flex-1 p-4 sm:p-5 overflow-y-auto hide-scrollbar bg-slate-50/20 relative">
+                            {view === 'dashboard' && (
+                                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                    <h2 className="text-lg font-bold text-slate-800 tracking-tight uppercase tracking-widest leading-none">Status Overview</h2>
+                                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden border-b-2 border-b-indigo-500">
+                                        <div className="overflow-x-auto w-full hide-scrollbar">
+                                            <table className="w-full text-left min-w-[700px] lg:min-w-0">
+                                                <thead>
+                                                    <tr className="bg-slate-50 border-b border-slate-100 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                                                        <th className="px-5 py-3">Training Offering</th>
+                                                        {role !== 'employee' && <th className="px-5 py-3">Learner Identity</th>}
+                                                        <th className="px-5 py-3 text-center">Units</th>
+                                                        <th className="px-5 py-3 text-center">Status</th>
+                                                        <th className="px-5 py-3 text-right">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {enrollments
+                                                        .filter(e => role === 'employee' ? e.learnerEmail === currentUser.email : true)
+                                                        .sort((a,b) => b.requestedDate.localeCompare(a.requestedDate))
+                                                        .map(e => (
+                                                        <tr key={e.id} className="hover:bg-slate-50/50 transition-colors text-[11px]">
+                                                            <td className="px-5 py-4">
+                                                                <p className="font-bold text-slate-800 text-xs tracking-tight mb-0.5">{e.courseName}</p>
+                                                                <p className="text-[9px] text-slate-400 font-bold uppercase">{e.requestedDate}</p>
+                                                                {e.rejectionReason && <div className="mt-2 p-2 bg-red-50 rounded border border-red-100 text-red-600 italic">Reason: {e.rejectionReason}</div>}
+                                                            </td>
+                                                            {role !== 'employee' && <td className="px-5 py-4 font-bold text-indigo-400 leading-none">{e.learnerEmail}</td>}
+                                                            <td className="px-5 py-4 text-center font-black text-slate-700 text-sm">{e.cost}</td>
+                                                            <td className="px-5 py-4 text-center whitespace-nowrap">
+                                                                <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider border shadow-sm ${
+                                                                    e.status === 'Enrolled' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
+                                                                    e.status === 'Rejected' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-amber-50 text-amber-600 border-amber-100'
+                                                                }`}>{e.status === 'Enrolled' ? 'Enrolled' : e.status === 'Canceled' ? 'Cancelled' : e.status === 'Rescheduled' ? 'Rescheduled' : e.status}</span>
+                                                            </td>
+                                                            <td className="px-5 py-4 text-right">
+                                                                {role !== 'employee' && e.status === 'PendingApproval' ? (
+                                                                    <div className="flex justify-end space-x-1.5">
+                                                                        <button onClick={() => approveEnrollment(e)} className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 shadow-sm"><Icon component={CheckCircle} size={14}/></button>
+                                                                        <button onClick={() => setRejectingEnrollment(e)} className="p-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 shadow-sm"><Icon component={XCircle} size={14}/></button>
+                                                                    </div>
+                                                                ) : role === 'employee' && !['Rejected', 'Canceled'].includes(e.status) ? (
+                                                                    <button onClick={() => cancelEnrollment(e)} className="p-2 bg-slate-100 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all rounded-lg"><Icon component={Trash2} size={14}/></button>
+                                                                ) : <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest italic opacity-50">Locked</span>}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {view === 'catalog' && (
+                                <div className="space-y-4 animate-in slide-in-from-bottom-2 duration-500 flex flex-col h-full overflow-hidden">
+                                    <div className="flex flex-col sm:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                                        <div className="relative flex-1 w-full">
+                                            <Icon component={Search} className="absolute left-3 top-2.5 text-slate-300" size={14}/>
+                                            <input value={searchTerm} onChange={e => setSearchSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500" placeholder="Search Offerings..."/>
+                                        </div>
+                                        <div className="flex gap-2 w-full sm:w-auto">
+                                            <select value={areaFilter} onChange={e => setAreaFilter(e.target.value)} className="flex-1 sm:flex-initial bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-[10px] font-bold uppercase tracking-wider outline-none">
+                                                <option value="All">All Functional Areas</option>
+                                                {areaOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                            </select>
+                                            {(role === 'admin' || role === 'manager') && (
+                                                <div className="flex gap-1">
+                                                    <button onClick={exportCatalog} className="p-2 bg-white border rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"><Icon component={Download} size={14}/></button>
+                                                    <button onClick={() => fileInputRef.current.click()} className="p-2 bg-white border rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"><Icon component={Upload} size={14}/></button>
+                                                    <input type="file" ref={fileInputRef} onChange={importCatalog} className="hidden" accept=".csv" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col min-h-0 border-b-4 border-b-indigo-600">
+                                        <div className="overflow-x-auto overflow-y-auto flex-1 hide-scrollbar">
+                                            <table className="w-full text-left min-w-[900px] border-separate border-spacing-0">
+                                                <thead className="sticky-header shadow-sm border-b">
+                                                    <tr className="bg-white text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
+                                                        <th className="px-6 py-3 border-b">Offering Name</th>
+                                                        <th className="px-6 py-3 border-b text-center">Type</th>
+                                                        <th className="px-6 py-3 border-b text-center">Units</th>
+                                                        <th className="px-6 py-3 border-b text-right pr-12">Enrollment</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {Object.entries(groupedCourses).map(([area, areaCourses]) => (
+                                                        <React.Fragment key={area}>
+                                                            <tr className="category-row border-y border-slate-200">
+                                                                <td colSpan="4" className="px-6 py-2">
+                                                                    <div className="flex items-center space-x-2">
+                                                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                                                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{area}</span>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                            {areaCourses.map(c => (
+                                                                <tr key={c.id} className="group hover:bg-slate-50 transition-colors">
+                                                                    <td className="px-8 py-4">
+                                                                        <div className="flex items-center space-x-2 mb-0.5">
+                                                                            <span className="font-bold text-slate-800 text-xs tracking-tight leading-tight">{c.name}</span>
+                                                                            {c.required === 'Required' && <span className="px-1.5 bg-red-50 text-red-500 text-[8px] font-black rounded border border-red-100 uppercase tracking-tighter">Required</span>}
+                                                                        </div>
+                                                                        <div className="flex items-center space-x-2">
+                                                                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{c.programName}</p>
+                                                                            <span className="text-slate-200 text-[10px]">•</span>
+                                                                            <span className="text-[8px] text-slate-400 font-black italic">{c.certificationType}</span>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 text-center">
+                                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter opacity-60">{c.offeringType}</span>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 text-center">
+                                                                        <div className="flex flex-col items-center leading-none">
+                                                                            <span className="text-sm font-black text-indigo-600">{c.cost}</span>
+                                                                            <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mt-0.5">Units</span>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4 text-right pr-12">
+                                                                        <button onClick={() => handleEnrollRequest(c)} className="px-4 py-1.5 bg-slate-900 text-white font-bold text-[9px] uppercase tracking-widest rounded hover:bg-indigo-600 transition-all active:scale-95 shadow-md flex items-center space-x-2 ml-auto">
+                                                                            <span>Request to Enroll</span><Icon component={ChevronRight} size={10}/>
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </React.Fragment>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {view === 'governance' && (
+                                <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-500">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                            <h3 className="font-black text-slate-900 uppercase tracking-widest text-[10px] mb-4">Identity Provisioning</h3>
+                                            <textarea id="invite-emails" className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-semibold focus:ring-1 focus:ring-indigo-500 min-h-[100px] mb-4 outline-none" placeholder="name@ibm.com, user@ibm.com..."></textarea>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <button onClick={() => inviteUsers(document.getElementById('invite-emails').value, 'employee')} className="py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase rounded-lg active:scale-95 shadow-sm">Add Employees</button>
+                                                {role === 'admin' && <button onClick={() => inviteUsers(document.getElementById('invite-emails').value, 'manager')} className="py-2.5 bg-indigo-600 text-white text-[9px] font-black uppercase rounded-lg active:scale-95 shadow-sm">Add Managers</button>}
+                                            </div>
+                                        </div>
+                                        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                                            <div className="px-5 py-3 border-b bg-slate-50 flex justify-between items-center"><h3 className="font-black text-slate-900 uppercase tracking-widest text-[10px]">Cloud Queue</h3><Icon component={Users} size={14} className="text-indigo-500 opacity-50"/></div>
+                                            <div className="divide-y divide-slate-100 max-h-[220px] overflow-y-auto">
+                                                {accessRequests.filter(r => role === 'admin' ? true : r.type === 'employee').map(r => (
+                                                    <div key={r.id} className="p-3 flex items-center justify-between hover:bg-slate-50/50">
+                                                        <div className="min-w-0 pr-4"><p className="text-[11px] font-bold text-slate-700 leading-none truncate tracking-tight">{r.email}</p><p className="text-[8px] text-slate-400 font-bold uppercase mt-1">Requested {r.type}</p></div>
+                                                        <div className="flex space-x-1.5 flex-shrink-0">
+                                                            <button onClick={() => processRequest(r, true)} className="px-3 py-1 bg-indigo-600 text-white text-[8px] font-bold rounded uppercase shadow-sm active:scale-90">Approve</button>
+                                                            <button onClick={() => processRequest(r, false)} className="px-3 py-1 bg-slate-100 text-slate-400 text-[8px] font-bold rounded uppercase active:scale-90">Dismiss</button>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {accessRequests.length === 0 && <div className="py-12 text-center text-[9px] text-slate-300 font-black uppercase tracking-widest opacity-40">Identity queue clear.</div>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                                        <h3 className="font-black text-slate-900 uppercase tracking-widest text-[10px] mb-4">Account Ledger</h3>
+                                        <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                            {(role === 'admin' ? allManagers : allEmployees).map(u => (
+                                                <div key={u.id} className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex flex-col justify-between shadow-inner">
+                                                    <div className="min-w-0 pr-2"><p className="text-[10px] font-bold text-slate-700 truncate leading-tight tracking-tight">{u.email}</p><p className={`text-[8px] font-black uppercase mt-1 ${u.isSetup ? 'text-emerald-500' : 'text-amber-500'}`}>{u.isSetup ? 'Sync Active' : 'Setup Required'}</p></div>
+                                                    <button onClick={() => resetUserPin(u.email, role === 'admin' ? 'manager' : 'employee')} className="mt-4 py-1.5 bg-white border border-slate-200 text-slate-400 text-[8px] font-black uppercase rounded hover:text-indigo-600 transition-all shadow-sm active:scale-95">Reset PIN</button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {view === 'admin' && (
+                                <div className="space-y-6 animate-in slide-in-from-bottom-2 duration-700 max-w-4xl mx-auto">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm border-t-4 border-t-indigo-600">
+                                            <h3 className="font-black text-slate-900 uppercase tracking-widest text-[10px] mb-6 flex items-center"><div className="p-1.5 bg-indigo-50 rounded mr-2"><Icon component={Plus} size={12}/></div>Entitlement Sync</h3>
+                                            <div className="space-y-3">
+                                                <select id="alloc-email" className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-[11px] font-bold uppercase tracking-wider outline-none focus:ring-1 focus:ring-indigo-500">
+                                                    <option value="">Choose Manager...</option>
+                                                    {allManagers.map(m => <option key={m.id} value={m.email}>{m.email}</option>)}
+                                                </select>
+                                                <input id="alloc-amount" className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-semibold outline-none" placeholder="Quantity (Training Units)..."/>
+                                                <input id="alloc-form" className="w-full px-3 py-2 bg-slate-50 border border-slate-100 rounded-lg text-xs font-semibold outline-none" placeholder="Order ID #"/>
+                                                <button onClick={async () => {
+                                                    const email = document.getElementById('alloc-email').value;
+                                                    const amount = parseFloat(document.getElementById('alloc-amount').value);
+                                                    const form = document.getElementById('alloc-form').value;
+                                                    if(!email || isNaN(amount)) return showMsg("Check inputs", "error");
+                                                    await db.collection('artifacts').doc(artifactId).collection('public').doc('data').collection('allocations').add({ managerEmail: email, approved: amount, used: 0, orderForm: form, expiry: '2026-12-31' });
+                                                    showMsg(`Provisioned ${amount} units`);
+                                                    document.getElementById('alloc-amount').value = ""; document.getElementById('alloc-form').value = "";
+                                                }} className="w-full py-2.5 bg-indigo-600 text-white font-black text-[9px] uppercase tracking-widest rounded-lg shadow-md hover:bg-indigo-700 active:scale-95 transition-all">Submit Allotment</button>
+                                            </div>
+                                        </div>
+                                        <div className="bg-slate-900 p-8 rounded-xl flex flex-col items-center justify-center space-y-4 text-center relative overflow-hidden group shadow-2xl border border-white/5">
+                                            <Icon component={Database} size={30} className="text-indigo-400 mb-2 group-hover:rotate-12 transition-transform duration-500"/>
+                                            <h4 className="text-white font-black uppercase tracking-widest text-[10px]">Cloud Infrastructure</h4>
+                                            <button onClick={seedSystem} className="px-8 py-2 bg-white text-slate-900 text-[9px] font-black rounded-lg uppercase tracking-widest shadow-xl active:scale-95 transition-all hover:bg-indigo-50">Master Re-Seed</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </main>
+                    </div>
+
+                    {rejectingEnrollment && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-300">
+                            <div className="bg-white rounded-xl w-full max-w-sm p-5 shadow-2xl animate-in zoom-in duration-200">
+                                <h3 className="font-bold text-slate-900 text-sm mb-1 uppercase tracking-tight">System Feedback</h3>
+                                <textarea value={rejectionReason} onChange={e => setRejectionReason(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-100 rounded-lg text-xs min-h-[100px] mb-4 outline-none focus:ring-1 focus:ring-red-500" placeholder="State reason for employee..."></textarea>
+                                <div className="flex space-x-2">
+                                    <button onClick={submitRejection} className="flex-1 py-2.5 bg-red-600 text-white rounded-lg text-[9px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Reject</button>
+                                    <button onClick={() => setRejectingEnrollment(null)} className="flex-1 py-2.5 bg-slate-100 text-slate-500 rounded-lg text-[9px] font-black uppercase tracking-widest active:scale-95 transition-all">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
